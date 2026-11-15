@@ -12,10 +12,10 @@ jobs:
     steps:
       - name: Khởi động iOS Simulator
         run: |
-          xcrun simctl list devices available | head -n 30
-          DEVICE_UDID=$(xcrun simctl list devices available | grep -E "iPhone" | head -n 1 | awk -F '[()]' '{print $(NF-1)}')
+          DEVICE_UDID="98A0BFA3-CEC3-4FD6-9916-5A2149774DBF"
           echo "Booting device: $DEVICE_UDID"
           xcrun simctl boot "$DEVICE_UDID" || true
+          xcrun simctl list devices | grep Booted || true
 
       - name: Mở kết nối tmate
         uses: mxschmitt/action-tmate@v3
