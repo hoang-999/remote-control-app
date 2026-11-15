@@ -10,36 +10,13 @@ jobs:
   run-mac:
     runs-on: macos-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Khởi động iOS Simulator
         run: |
           DEVICE_UDID="98A0BFA3-CEC3-4FD6-9916-5A2149774DBF"
           echo "Booting device: $DEVICE_UDID"
           xcrun simctl boot "$DEVICE_UDID" || true
 
-      - name: Cài đặt và kích hoạt tmate
-        run: |
-          brew install tmate
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          
-          WEB_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
-          SSH_CMD=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          
-          echo "WEB: $WEB_URL"
-          echo "SSH: $SSH_CMD"
-          
-          git config user.name "hoang-999"
-          git config user.email "hoang@example.com"
-          git checkout -B tmate-live
-          echo "$WEB_URL" > link.txt
-          echo "$SSH_CMD" >> link.txt
-          git add link.txt
-          git commit -m "Live link: $WEB_URL" || true
-          git push -f origin tmate-live || true
-          
-          while [ -S /tmp/tmate.sock ]; do
-            sleep 10
-          done
+      - name: Bật tmate với timeout dài
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: false
