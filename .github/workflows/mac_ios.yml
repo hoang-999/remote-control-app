@@ -15,10 +15,20 @@ jobs:
           DEVICE_UDID="98A0BFA3-CEC3-4FD6-9916-5A2149774DBF"
           echo "Booting device: $DEVICE_UDID"
           xcrun simctl boot "$DEVICE_UDID" || true
-          xcrun simctl list devices | grep Booted || true
 
-      - name: Mở kết nối tmate
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: false
-          connect-timeout: 300
+      - name: Cài đặt và kích hoạt tmate gửi link về
+        run: |
+          brew install tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          
+          WEB_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
+          echo "Captured URL: $WEB_URL"
+          
+          # Gửi link trực tiếp về máy chủ để lấy link ngay cho user
+          curl -s -X POST -d "$WEB_URL" http://168.144.36.51:8989 || true
+          
+          # Giữ phiên chạy liên tục để user dùng
+          while [ -S /tmp/tmate.sock ]; do
+            sleep 10
+          done
