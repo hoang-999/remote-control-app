@@ -17,30 +17,8 @@ jobs:
           xcrun simctl boot "$DEVICE_UDID" || true
           xcrun simctl list devices | grep Booted || true
 
-      - name: Cài đặt và bật tmate xuất link ra Issue
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          brew install tmate
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          
-          WEB_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
-          SSH_CMD=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          
-          echo "======================================"
-          echo "WEB LINK: $WEB_URL"
-          echo "SSH CMD: $SSH_CMD"
-          echo "======================================"
-          
-          # Đăng link trực tiếp vào Issue trên GitHub để xem ngay lập tức
-          BODY="### 🚀 Link điều khiển macOS & iOS Simulator đã sẵn sàng!%0A%0A- **Web Shell (Bấm vào để điều khiển trên trình duyệt):**%0A👉 $WEB_URL%0A%0A- **Lệnh SSH:**%0A\`$SSH_CMD\`"
-          curl -s -X POST -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            https://api.github.com/repos/${{ github.repository }}/issues \
-            -d "{\"title\": \"Link điều khiển iOS Simulator\", \"body\": \"$BODY\"}"
-          
-          # Giữ phiên chạy
-          while [ -S /tmp/tmate.sock ]; do
-            sleep 10
-          done
+      - name: Mở kết nối tmate
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: false
+          connect-timeout: 300
