@@ -15,8 +15,23 @@ jobs:
           DEVICE_UDID="98A0BFA3-CEC3-4FD6-9916-5A2149774DBF"
           echo "Booting device: $DEVICE_UDID"
           xcrun simctl boot "$DEVICE_UDID" || true
+          xcrun simctl list devices | grep Booted || true
 
-      - name: Bật tmate với timeout dài
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: false
+      - name: Chạy Web Terminal trực tiếp bằng Python
+        run: |
+          # Cài đặt wetty hoặc ttyd (web terminal nhẹ, không bị chặn bởi tmate server)
+          brew install ttyd
+          
+          # Chạy ttyd tạo web terminal trên cổng 7681
+          ttyd -p 7681 -W bash &
+          sleep 2
+          
+          # Tải cloudflared để mở public URL an toàn không cần tài khoản
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz | tar -xz
+          sudo cp cloudflared /usr/local/bin/cloudflared
+          
+          echo "=========================================================="
+          echo "Đang tạo đường link Web Terminal..."
+          echo "=========================================================="
+          
+          cloudflared tunnel --url http://127.0.0.1:7681 --no-autoupdate
