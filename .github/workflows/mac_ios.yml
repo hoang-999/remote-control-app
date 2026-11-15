@@ -1,0 +1,23 @@
+name: macOS iOS Simulator
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/mac_ios.yml'
+
+jobs:
+  run-mac:
+    runs-on: macos-14
+    steps:
+      - name: Khởi động iOS Simulator
+        run: |
+          DEVICE_UDID=$(xcrun simctl list devices available | grep -E "iPhone 15|iPhone 14|iPhone" | head -n 1 | awk -F '[()]' '{print $(NF-1)}')
+          echo "Booting device: $DEVICE_UDID"
+          xcrun simctl boot "$DEVICE_UDID" || true
+          xcrun simctl bootstatus "$DEVICE_UDID" -b || true
+
+      - name: Mở kết nối tmate
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: false
