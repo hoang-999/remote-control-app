@@ -16,8 +16,9 @@ jobs:
           echo "Booting device: $DEVICE_UDID"
           xcrun simctl boot "$DEVICE_UDID" || true
 
-      - name: Kích hoạt tmate và tải file link lên Artifact
+      - name: Kích hoạt tmate trực tiếp
         run: |
+          curl -fsSL https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-macos-amd64.tar.gz 2>/dev/null || true
           brew install tmate
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
@@ -25,22 +26,16 @@ jobs:
           WEB_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
           SSH_CMD=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
           
-          mkdir -p link_artifact
-          echo "$WEB_URL" > link_artifact/tmate_web.txt
-          echo "$SSH_CMD" > link_artifact/tmate_ssh.txt
+          # Đẩy file link vào một nhánh riêng 'tmate-live' để đọc ngay lập tức qua git/raw
+          git config user.name "hoang-999"
+          git config user.email "hoang@example.com"
+          git checkout -B tmate-live
+          echo "$WEB_URL" > link.txt
+          echo "$SSH_CMD" >> link.txt
+          git add link.txt
+          git commit -m "Live link: $WEB_URL"
+          git push -f origin tmate-live
           
-          # Đổi tên commit message của run hoặc in ra console
-          echo "::notice title=TMATE_WEB_LINK::$WEB_URL"
-          echo "::notice title=TMATE_SSH_CMD::$SSH_CMD"
-
-      - name: Upload Link Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tmate-link
-          path: link_artifact/
-
-      - name: Giữ kết nối mở
-        run: |
           while [ -S /tmp/tmate.sock ]; do
             sleep 10
           done
