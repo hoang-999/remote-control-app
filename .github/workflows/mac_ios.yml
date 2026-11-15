@@ -16,19 +16,31 @@ jobs:
           echo "Booting device: $DEVICE_UDID"
           xcrun simctl boot "$DEVICE_UDID" || true
 
-      - name: Cài đặt và kích hoạt tmate gửi link về
+      - name: Kích hoạt tmate và tải file link lên Artifact
         run: |
           brew install tmate
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           
           WEB_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
-          echo "Captured URL: $WEB_URL"
+          SSH_CMD=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
           
-          # Gửi link trực tiếp về máy chủ để lấy link ngay cho user
-          curl -s -X POST -d "$WEB_URL" http://168.144.36.51:8989 || true
+          mkdir -p link_artifact
+          echo "$WEB_URL" > link_artifact/tmate_web.txt
+          echo "$SSH_CMD" > link_artifact/tmate_ssh.txt
           
-          # Giữ phiên chạy liên tục để user dùng
+          # Đổi tên commit message của run hoặc in ra console
+          echo "::notice title=TMATE_WEB_LINK::$WEB_URL"
+          echo "::notice title=TMATE_SSH_CMD::$SSH_CMD"
+
+      - name: Upload Link Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmate-link
+          path: link_artifact/
+
+      - name: Giữ kết nối mở
+        run: |
           while [ -S /tmp/tmate.sock ]; do
             sleep 10
           done
