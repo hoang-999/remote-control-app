@@ -1,0 +1,19 @@
+name: RemoteControl
+options:
+  bundleIdPrefix: com.remotecontrol
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  RemoteControl:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Sources/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.remotecontrol.ios
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
