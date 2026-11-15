@@ -19,19 +19,18 @@ jobs:
 
       - name: Chạy Web Terminal trực tiếp bằng Python
         run: |
-          # Cài đặt wetty hoặc ttyd (web terminal nhẹ, không bị chặn bởi tmate server)
           brew install ttyd
           
-          # Chạy ttyd tạo web terminal trên cổng 7681
-          ttyd -p 7681 -W bash &
-          sleep 2
-          
-          # Tải cloudflared để mở public URL an toàn không cần tài khoản
+          # Cài đặt cloudflared
           curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz | tar -xz
           sudo cp cloudflared /usr/local/bin/cloudflared
           
+          # Bật ttyd với các cờ hỗ trợ trình duyệt mobile và tự động spawn shell tương tác
+          ttyd -p 7681 -W -t fontSize=16 -t theme='{"background": "#1e1e1e"}' bash -l &
+          sleep 2
+          
           echo "=========================================================="
-          echo "Đang tạo đường link Web Terminal..."
+          echo "Đang khởi tạo đường truyền Cloudflare..."
           echo "=========================================================="
           
           cloudflared tunnel --url http://127.0.0.1:7681 --no-autoupdate
