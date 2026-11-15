@@ -1,5 +1,7 @@
+import ctypes
 import io
 import json
+import os
 import random
 import threading
 import time
@@ -11,8 +13,108 @@ from PIL import Image, ImageTk
 import websocket
 
 pyautogui.FAILSAFE = False
-
 DEFAULT_SERVER = "ws://168.144.36.51:8081"
+
+
+# --- Windows Native SendInput() (Zero-latency Win32 Input Injection) ---
+if os.name == "nt":
+    LONG = ctypes.c_long
+    DWORD = ctypes.c_ulong
+    ULONG_PTR = ctypes.POINTER(ctypes.c_ulong)
+    WORD = ctypes.c_ushort
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", LONG), ("dy", LONG), ("mouseData", DWORD),
+            ("dwFlags", DWORD), ("time", DWORD), ("dwExtraInfo", ULONG_PTR),
+        ]
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", WORD), ("wScan", WORD), ("dwFlags", DWORD),
+            ("time", DWORD), ("dwExtraInfo", ULONG_PTR),
+        ]
+
+    class _INPUTunion(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", DWORD), ("union", _INPUTunion)]
+
+    INPUT_MOUSE = 0
+    INPUT_KEYBOARD = 1
+    MOUSEEVENTF_MOVE = 0x0001
+    MOUSEEVENTF_LEFTDOWN = 0x0002
+    MOUSEEVENTF_LEFTUP = 0x0004
+    MOUSEEVENTF_RIGHTDOWN = 0x0008
+    MOUSEEVENTF_RIGHTUP = 0x0010
+    MOUSEEVENTF_WHEEL = 0x0800
+    MOUSEEVENTF_ABSOLUTE = 0x8000
+    KEYEVENTF_KEYUP = 0x0002
+    KEYEVENTF_UNICODE = 0x0004
+    _user32 = ctypes.windll.user32
+
+    def _win_send(inp_list):
+        arr = (INPUT * len(inp_list))(*inp_list)
+        _user32.SendInput(len(inp_list), arr, ctypes.sizeof(INPUT))
+
+    def _abs_xy(nx: float, ny: float):
+        return int(max(0.0, min(1.0, nx)) * 65535), int(max(0.0, min(1.0, ny)) * 65535)
+
+    def win_move(nx: float, ny: float):
+        ax, ay = _abs_xy(nx, ny)
+        _win_send([INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dx=ax, dy=ay, dwFlags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)))])
+
+    def win_click(nx: float, ny: float, right: bool = False):
+        ax, ay = _abs_xy(nx, ny)
+        down = MOUSEEVENTF_RIGHTDOWN if right else MOUSEEVENTF_LEFTDOWN
+        up = MOUSEEVENTF_RIGHTUP if right else MOUSEEVENTF_LEFTUP
+        _win_send([
+            INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dx=ax, dy=ay, dwFlags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE))),
+            INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dwFlags=down))),
+            INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dwFlags=up))),
+        ])
+
+    def win_dblclick(nx: float, ny: float):
+        win_click(nx, ny, False)
+        win_click(nx, ny, False)
+
+    def win_drag(x1: float, y1: float, x2: float, y2: float):
+        ax1, ay1 = _abs_xy(x1, y1)
+        ax2, ay2 = _abs_xy(x2, y2)
+        _win_send([
+            INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dx=ax1, dy=ay1, dwFlags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE))),
+            INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dwFlags=MOUSEEVENTF_LEFTDOWN))),
+        ])
+        time.sleep(0.03)
+        _win_send([
+            INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dx=ax2, dy=ay2, dwFlags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE))),
+            INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(dwFlags=MOUSEEVENTF_LEFTUP))),
+        ])
+
+    def win_scroll(dy: int):
+        _win_send([INPUT(type=INPUT_MOUSE, union=_INPUTunion(mi=MOUSEINPUT(mouseData=DWORD(dy * 120).value, dwFlags=MOUSEEVENTF_WHEEL)))])
+
+    def win_vk(vk: int):
+        _win_send([
+            INPUT(type=INPUT_KEYBOARD, union=_INPUTunion(ki=KEYBDINPUT(wVk=vk))),
+            INPUT(type=INPUT_KEYBOARD, union=_INPUTunion(ki=KEYBDINPUT(wVk=vk, dwFlags=KEYEVENTF_KEYUP))),
+        ])
+
+    def win_text(txt: str):
+        inps = []
+        for ch in txt:
+            code = ord(ch)
+            inps.append(INPUT(type=INPUT_KEYBOARD, union=_INPUTunion(ki=KEYBDINPUT(wScan=code, dwFlags=KEYEVENTF_UNICODE))))
+            inps.append(INPUT(type=INPUT_KEYBOARD, union=_INPUTunion(ki=KEYBDINPUT(wScan=code, dwFlags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP))))
+        if inps:
+            _win_send(inps)
+
+
+def fmt_id9() -> str:
+    n = random.randint(100000000, 999999999)
+    s = str(n)
+    return f"{s[:3]} {s[3:6]} {s[6:]}"
 
 
 class UltraViewerPC:
@@ -24,25 +126,21 @@ class UltraViewerPC:
         self.root.configure(bg="#F2F5FA")
 
         self.server_url = DEFAULT_SERVER
-        self.my_id = str(random.randint(100000, 999999))
+        self.my_id = fmt_id9()
         self.my_pw = str(random.randint(1000, 9999))
-        self.personal_pw = ""
 
         self.host_ws = None
         self.viewer_ws = None
         self.streaming = False
-        self.viewer_count = 0
 
         self.remote_win = None
         self.remote_canvas = None
         self.remote_photo = None
-        self.remote_img_size = (1, 1)
 
         self._build_ui()
         self.root.after(200, self.connect_host)
 
     def _build_ui(self):
-        # Top menu strip
         menu_bar = tk.Frame(self.root, bg="#D7E2F1", height=24)
         menu_bar.pack(fill="x")
         for label, cmd in [
@@ -50,13 +148,11 @@ class UltraViewerPC:
             ("Thiết lập", self.on_settings),
             ("Trợ giúp", lambda: messagebox.showinfo("Trợ giúp", f"Server: {self.server_url}")),
         ]:
-            btn = tk.Button(
+            tk.Button(
                 menu_bar, text=label, bg="#D7E2F1", relief="flat",
                 font=("Segoe UI", 9), padx=8, pady=1, command=cmd, cursor="hand2"
-            )
-            btn.pack(side="left")
+            ).pack(side="left")
 
-        # Banner strip with blue monitor icon + help button
         banner = tk.Frame(self.root, bg="#F2F5FA", height=54)
         banner.pack(fill="x", padx=14, pady=(6, 2))
         strip = tk.Canvas(banner, height=42, bg="#ECE9D8", highlightthickness=1, highlightbackground="#D3CFC0")
@@ -67,26 +163,21 @@ class UltraViewerPC:
         strip.create_rectangle(22, 26, 28, 30, fill="#FFFFFF", outline="#FFFFFF")
         strip.create_line(19, 31, 31, 31, fill="#FFFFFF", width=2)
 
-        # Two-column body
         body = tk.Frame(self.root, bg="#F2F5FA")
         body.pack(fill="both", expand=True, padx=16, pady=4)
 
         left = tk.Frame(body, bg="#F2F5FA", width=275)
         left.pack(side="left", fill="both", expand=True)
 
-        sep = tk.Frame(body, bg="#C8CED8", width=1)
-        sep.pack(side="left", fill="y", padx=10, pady=10)
+        tk.Frame(body, bg="#C8CED8", width=1).pack(side="left", fill="y", padx=10, pady=10)
 
         right = tk.Frame(body, bg="#F2F5FA", width=275)
         right.pack(side="left", fill="both", expand=True)
 
-        # Left Header: Cho phép điều khiển
-        lh = tk.Label(
+        tk.Label(
             left, text="📡  Cho phép điều khiển", bg="#EEF2F8", fg="#1B75BC",
-            font=("Segoe UI", 11, "bold"), anchor="w", padx=8, pady=5,
-            relief="groove", bd=1
-        )
-        lh.pack(fill="x", pady=(0, 8))
+            font=("Segoe UI", 11, "bold"), anchor="w", padx=8, pady=5, relief="groove", bd=1
+        ).pack(fill="x", pady=(0, 8))
         tk.Label(
             left,
             text="Hãy gửi ID và Mật khẩu dưới đây cho đối tác nếu\nbạn muốn cho họ điều khiển máy tính của mình",
@@ -114,13 +205,10 @@ class UltraViewerPC:
         tk.Entry(f_ppw, textvariable=self.var_personal_pw, show="*", font=("Segoe UI", 10), width=14).pack(side="left")
         tk.Button(f_ppw, text="🔑", font=("Segoe UI", 9), command=self.apply_personal_pw, padx=5).pack(side="left", padx=4)
 
-        # Right Header: Điều khiển máy tính khác
-        rh = tk.Label(
+        tk.Label(
             right, text="👤  Điều khiển máy tính khác", bg="#EEF2F8", fg="#1B75BC",
-            font=("Segoe UI", 11, "bold"), anchor="w", padx=8, pady=5,
-            relief="groove", bd=1
-        )
-        rh.pack(fill="x", pady=(0, 8))
+            font=("Segoe UI", 11, "bold"), anchor="w", padx=8, pady=5, relief="groove", bd=1
+        ).pack(fill="x", pady=(0, 8))
         tk.Label(
             right,
             text="Hãy nhập ID và Mật khẩu của máy bạn cần điều\nkhiển",
@@ -139,14 +227,12 @@ class UltraViewerPC:
         self.ent_target_pw = tk.Entry(f_tpw, show="*", font=("Segoe UI", 10), width=18)
         self.ent_target_pw.pack(side="left")
 
-        btn_connect = tk.Button(
+        tk.Button(
             right, text="➔  Bắt đầu điều khiển", font=("Segoe UI", 9.5, "bold"),
             bg="#E9EEF5", fg="#1E395B", relief="raised", padx=12, pady=6,
             cursor="hand2", command=self.start_control
-        )
-        btn_connect.pack(pady=(18, 0), anchor="center")
+        ).pack(pady=(18, 0), anchor="center")
 
-        # Bottom Status Bar
         status_bar = tk.Frame(self.root, bg="#E8EEF7", height=28, bd=1, relief="sunken")
         status_bar.pack(fill="x", side="bottom")
         self.dot_canvas = tk.Canvas(status_bar, width=16, height=16, bg="#E8EEF7", highlightthickness=0)
@@ -238,19 +324,43 @@ class UltraViewerPC:
                         h = int(img.height * (max_w / img.width))
                         img = img.resize((max_w, h), Image.BILINEAR)
                     buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=65, optimize=False)
+                    img.save(buf, format="JPEG", quality=62, optimize=False)
                     self.host_ws.send(buf.getvalue(), opcode=websocket.ABNF.OPCODE_BINARY)
                 except Exception:
                     break
                 dt = time.time() - t0
-                if dt < 0.055:
-                    time.sleep(0.055 - dt)
+                if dt < 0.042:
+                    time.sleep(0.042 - dt)
         self.streaming = False
 
     def _handle_input_event(self, msg: dict):
-        sw, sh = pyautogui.size()
         t = msg.get("type")
         try:
+            if os.name == "nt":
+                if t == "move":
+                    win_move(msg["x"], msg["y"])
+                elif t == "click":
+                    win_click(msg["x"], msg["y"], False)
+                elif t == "dblclick":
+                    win_dblclick(msg["x"], msg["y"])
+                elif t == "rightclick":
+                    win_click(msg["x"], msg["y"], True)
+                elif t == "drag":
+                    win_drag(msg["x1"], msg["y1"], msg["x2"], msg["y2"])
+                elif t == "scroll":
+                    win_scroll(int(msg.get("dy", 0)))
+                elif t == "key":
+                    vk_map = {"enter": 0x0D, "backspace": 0x08, "esc": 0x1B, "tab": 0x09, "win": 0x5B, "space": 0x20}
+                    k = str(msg.get("key", "")).lower()
+                    if k in vk_map:
+                        win_vk(vk_map[k])
+                    elif len(k) == 1:
+                        win_text(k)
+                elif t == "text":
+                    win_text(str(msg.get("text", "")))
+                return
+
+            sw, sh = pyautogui.size()
             if t == "move":
                 pyautogui.moveTo(int(msg["x"] * sw), int(msg["y"] * sh))
             elif t == "click":
@@ -261,7 +371,7 @@ class UltraViewerPC:
                 pyautogui.click(int(msg["x"] * sw), int(msg["y"] * sh), button="right")
             elif t == "drag":
                 pyautogui.moveTo(int(msg["x1"] * sw), int(msg["y1"] * sh))
-                pyautogui.dragTo(int(msg["x2"] * sw), int(msg["y2"] * sh), duration=0.12, button="left")
+                pyautogui.dragTo(int(msg["x2"] * sw), int(msg["y2"] * sh), duration=0.1, button="left")
             elif t == "scroll":
                 pyautogui.scroll(int(msg.get("dy", 0)))
             elif t == "key":
@@ -329,7 +439,6 @@ class UltraViewerPC:
         win.geometry("1024x640")
         canvas = tk.Canvas(win, bg="black", cursor="cross")
         canvas.pack(fill="both", expand=True)
-
         drag_start = {"x": None, "y": None}
 
         def to_norm(ev):
@@ -338,8 +447,7 @@ class UltraViewerPC:
             return max(0.0, min(1.0, ev.x / cw)), max(0.0, min(1.0, ev.y / ch))
 
         def on_press(ev):
-            nx, ny = to_norm(ev)
-            drag_start["x"], drag_start["y"] = nx, ny
+            drag_start["x"], drag_start["y"] = to_norm(ev)
 
         def on_release(ev):
             nx, ny = to_norm(ev)
@@ -350,35 +458,23 @@ class UltraViewerPC:
             else:
                 self._send_viewer({"type": "click", "x": nx, "y": ny})
 
-        def on_right(ev):
-            nx, ny = to_norm(ev)
-            self._send_viewer({"type": "rightclick", "x": nx, "y": ny})
-
-        def on_double(ev):
-            nx, ny = to_norm(ev)
-            self._send_viewer({"type": "dblclick", "x": nx, "y": ny})
-
-        def on_wheel(ev):
-            dy = 3 if ev.delta > 0 else -3
-            self._send_viewer({"type": "scroll", "dy": dy})
-
-        def on_key(ev):
-            if ev.keysym in ("Return", "BackSpace", "Escape", "Tab", "space"):
-                k = {"Return": "enter", "BackSpace": "backspace", "Escape": "esc", "Tab": "tab", "space": "space"}[ev.keysym]
-                self._send_viewer({"type": "key", "key": k})
-            elif ev.char and len(ev.char) == 1:
-                self._send_viewer({"type": "text", "text": ev.char})
-
         canvas.bind("<ButtonPress-1>", on_press)
         canvas.bind("<ButtonRelease-1>", on_release)
-        canvas.bind("<Button-3>", on_right)
-        canvas.bind("<Double-Button-1>", on_double)
-        canvas.bind("<MouseWheel>", on_wheel)
-        win.bind("<Key>", on_key)
+        canvas.bind("<Button-3>", lambda ev: self._send_viewer({"type": "rightclick", "x": to_norm(ev)[0], "y": to_norm(ev)[1]}))
+        canvas.bind("<Double-Button-1>", lambda ev: self._send_viewer({"type": "dblclick", "x": to_norm(ev)[0], "y": to_norm(ev)[1]}))
+        canvas.bind("<MouseWheel>", lambda ev: self._send_viewer({"type": "scroll", "dy": 3 if ev.delta > 0 else -3}))
+        win.bind("<Key>", lambda ev: self._on_remote_key(ev))
         win.protocol("WM_DELETE_WINDOW", self._close_remote_window)
 
         self.remote_win = win
         self.remote_canvas = canvas
+
+    def _on_remote_key(self, ev):
+        if ev.keysym in ("Return", "BackSpace", "Escape", "Tab", "space"):
+            k = {"Return": "enter", "BackSpace": "backspace", "Escape": "esc", "Tab": "tab", "space": "space"}[ev.keysym]
+            self._send_viewer({"type": "key", "key": k})
+        elif ev.char and len(ev.char) == 1:
+            self._send_viewer({"type": "text", "text": ev.char})
 
     def _render_remote_frame(self, img: Image.Image):
         if not self.remote_canvas or not self.remote_canvas.winfo_exists():

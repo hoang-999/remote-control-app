@@ -3,8 +3,12 @@ const { WebSocketServer } = require('ws');
 const PORT = process.env.PORT || 8081;
 const wss = new WebSocketServer({ port: PORT });
 
-// id -> { ws, password, viewers: Set<WebSocket> }
+// normalizedId (no spaces) -> { ws, password, viewers: Set<WebSocket> }
 const hosts = new Map();
+
+function normId(id) {
+  return String(id || '').replace(/\s+/g, '');
+}
 
 wss.on('connection', (ws) => {
   let role = null; // 'host' | 'viewer'
@@ -26,14 +30,19 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'register' && msg.id && msg.password) {
       role = 'host';
-      hostId = String(msg.id);
+      hostId = normId(msg.id);
       hosts.set(hostId, { ws, password: String(msg.password), viewers: new Set() });
-      ws.send(JSON.stringify({ type: 'registered', id: hostId }));
+      ws.send(JSON.stringify({
+        type: 'registered',
+        id: hostId,
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      }));
       return;
     }
 
     if (msg.type === 'connect' && msg.targetId && msg.password) {
-      const h = hosts.get(String(msg.targetId));
+      const tid = normId(msg.targetId);
+      const h = hosts.get(tid);
       if (!h) {
         ws.send(JSON.stringify({ type: 'error', message: 'Không tìm thấy ID đối tác' }));
         return;
@@ -43,13 +52,31 @@ wss.on('connection', (ws) => {
         return;
       }
       role = 'viewer';
-      targetHostId = String(msg.targetId);
+      targetHostId = tid;
       h.viewers.add(ws);
-      ws.send(JSON.stringify({ type: 'connected', targetId: targetHostId }));
+      ws.send(JSON.stringify({
+        type: 'connected',
+        targetId: tid,
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      }));
       if (h.ws.readyState === 1) h.ws.send(JSON.stringify({ type: 'viewer-joined' }));
       return;
     }
 
+    // WebRTC signaling relay (sdp-offer, sdp-answer, ice-candidate)
+    if (msg.type === 'sdp-offer' || msg.type === 'sdp-answer' || msg.type === 'ice-candidate') {
+      if (role === 'viewer' && targetHostId && hosts.has(targetHostId)) {
+        const h = hosts.get(targetHostId);
+        if (h.ws.readyState === 1) h.ws.send(raw.toString());
+      } else if (role === 'host' && hostId && hosts.has(hostId)) {
+        for (const v of hosts.get(hostId).viewers) {
+          if (v.readyState === 1) v.send(raw.toString());
+        }
+      }
+      return;
+    }
+
+    // Input control relay
     if (role === 'viewer' && targetHostId && hosts.has(targetHostId)) {
       const h = hosts.get(targetHostId);
       if (h.ws.readyState === 1) h.ws.send(raw.toString());
@@ -71,4 +98,4 @@ wss.on('connection', (ws) => {
   });
 });
 
-console.log(`PC Remote server listening on :${PORT}`);
+console.log(`PC Remote Signaling & Relay server listening on :${PORT}`);

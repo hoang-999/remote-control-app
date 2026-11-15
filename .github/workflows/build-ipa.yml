@@ -1,14 +1,17 @@
-name: Build iOS IPA
+name: Build Protected IPA & EXE
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-ipa:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+
+      - name: One-way protect iOS strings
+        run: python3 scripts/oneway_protect.py --ios
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -17,7 +20,7 @@ jobs:
         working-directory: ios
         run: xcodegen generate
 
-      - name: Build unsigned app
+      - name: Build stripped Release app
         working-directory: ios
         run: |
           xcodebuild \
@@ -31,14 +34,46 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             clean build
 
-      - name: Package IPA
+      - name: Package IPA & SHA-256
         run: |
           mkdir -p Payload
           cp -r ios/build/Build/Products/Release-iphoneos/RemoteControl.app Payload/
-          zip -r RemoteControl-unsigned.ipa Payload
+          strip -x Payload/RemoteControl.app/RemoteControl || true
+          zip -r RemoteControl.ipa Payload
+          shasum -a 256 RemoteControl.ipa > RemoteControl.ipa.sha256
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: RemoteControl-IPA
-          path: RemoteControl-unsigned.ipa
+          path: |
+            RemoteControl.ipa
+            RemoteControl.ipa.sha256
+
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r pc/requirements.txt pyinstaller
+
+      - name: One-way protect PC source & build EXE
+        run: |
+          python scripts/oneway_protect.py --pc
+          pyinstaller --onefile --windowed --strip --name UltraViewer pc/ultraviewer_protected.py
+          certutil -hashfile dist/UltraViewer.exe SHA256 > dist/UltraViewer.exe.sha256
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UltraViewer-EXE
+          path: |
+            dist/UltraViewer.exe
+            dist/UltraViewer.exe.sha256
